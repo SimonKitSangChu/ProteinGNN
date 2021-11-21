@@ -9,13 +9,6 @@ from ..data import *
 AnyPath = Union[str, PosixPath, WindowsPath]
 AnyNum = Union[int, float]
 
-AA_ALPHABETS = list('ACDEFGHIKLMNPQRSTVWY')
-PYROSETTA_INIT = False
-ESM_MODEL = None
-ESM_ALPHABET = None
-ESM_BATCH_CONVERTER = None
-CUDA_AVAILABLE = torch.cuda.is_available()
-
 
 def _log2en_rcsb_mismatch(log2en: pd.DataFrame, seqrec_wt: Iterable) -> List[int]:
     """Find resid mismatch between log2en csv and rcsb fasta."""
