@@ -3,6 +3,7 @@ from Bio.SeqRecord import SeqRecord
 import math
 from io import StringIO
 from torch.utils.data import DataLoader
+from typing import *
 
 from ..data import *
 
@@ -312,15 +313,7 @@ class EmbLibraryCreator:
         else:
             raise ValueError('Invalid pssm_dim.')
 
-    def esm_embedding(self, seqrec, pssm_dim, embedding_wt=None, pure_embedding=None, **kwargs):
-        data = [('dummy', seqrec)]
-        if pure_embedding is None:
-            embedding = get_esm_representations(data, **kwargs)
-            if embedding_wt is not None:
-                embedding = embedding - embedding_wt
-        else:
-            embedding = pure_embedding
-
+    def _add_pssm_embedding(self, pssm_dim: Optional[int] = None, embedding: Optional[torch.Tensor] = None):
         if pssm_dim is None:
             return embedding
         elif pssm_dim == 1:
@@ -332,6 +325,35 @@ class EmbLibraryCreator:
             return torch.cat([embedding, self.pssm2D], axis=1)
         else:
             raise ValueError('Invalid pssm_dim.')
+
+    def esm_embedding(self, seqrec: Union[str, SeqRecord], pssm_dim: Optional[int] = None,
+                      embedding_wt: Optional[torch.Tensor] = None, pure_embedding: Optional[torch.Tensor] = None,
+                      **kwargs):
+        data = [('dummy', seqrec)]
+        if pure_embedding is None:
+            embedding = get_esm_representations(data, **kwargs)
+            if embedding_wt is not None:
+                embedding = embedding - embedding_wt
+        else:
+            embedding = pure_embedding
+
+        return self._add_pssm_embedding(pssm_dim=pssm_dim, embedding=embedding)
+
+    def protbert_embedding(self, seqrec: Union[str, SeqRecord], pssm_dim: Optional[int] = None,
+                           embedding_wt: Optional[torch.Tensor] = None, pure_embedding: Optional[torch.Tensor] = None,
+                           **kwargs):
+        if type(seqrec) != str:
+            seqrec = str(seqrec.seq)
+
+        if pure_embedding is None:
+            embedding = get_protbert_embedding([seqrec], **kwargs)
+            if embedding_wt is not None:
+                    embedding = embedding - embedding_wt
+        else:
+            embedding = pure_embedding
+
+        return self._add_pssm_embedding(pssm_dim=pssm_dim, embedding=embedding)
+
 
     def onehot_embedding(self, seqrec, pssm_dim, embedding_wt=None, pure_embedding=None):
         if pure_embedding is None:
@@ -509,10 +531,6 @@ class DefaultDatamodule(BaseDatamodule):
         print(f'Contains self-loops: {self.example_input_array.contains_self_loops()}')
         print(f'Is undirected: {self.example_input_array.is_undirected()}')
         print('====================')
-
-    @property
-    def log2en(self):
-        return self.dataset.exp_data
 
     @property
     def mut_names(self):

@@ -15,6 +15,7 @@ import sys
 import torch
 import torch.nn.functional as F
 import torch_geometric as torchg
+from transformers import BertTokenizer, BertModel
 from tqdm import tqdm
 from typing import List, Union, Optional, Generator, Dict, Tuple, Callable, Set, Type, Iterable, Any
 import json
@@ -30,13 +31,15 @@ AtomIDType = pyrosetta.rosetta.core.id.AtomID
 EdgeType = List[int]
 
 VERBOSE = 0
+CUDA_AVAILABLE = torch.cuda.is_available()
 CLONE_RMSD = 1e-7
 AA_ALPHABETS = list('ACDEFGHIKLMNPQRSTVWY')
 PYROSETTA_INIT = False
 ESM_MODEL = None
 ESM_ALPHABET = None
 ESM_BATCH_CONVERTER = None
-CUDA_AVAILABLE = torch.cuda.is_available()
+PROTBERT_MODEL = None
+PROTBERT_TOKENIZER = None
 
 
 def is_dummy_mut(mut_name: str) -> bool:
@@ -140,6 +143,41 @@ def get_esm_representations(data, layers: Optional[List[int]] = None, model_name
     representations = [results['representations'][layer_i].squeeze()[1:-1] for layer_i in layers]
     representations = torch.cat(representations, dim=1).squeeze()
     return representations.cpu()
+
+
+def get_protbert_embedding(sequences: List[str], model_name: Optional[str] = None):
+    if model_name is None:
+        model_name = 'Rostlab/prot_bert_bfd'
+
+    model = globals()['PROTBERT_MODEL']
+    tokenizer = globals()['PROTBERT_TOKENIZER']
+
+    if model is None or tokenizer is None:
+        model = BertModel.from_pretrained(model_name)
+        tokenizer = BertTokenizer.from_pretrained(model_name)
+
+        model = model.eval()
+        if CUDA_AVAILABLE:
+            model = model.cuda()
+
+        globals()['PROTBERT_MODEL'] = model
+        globals()['PROTBERT_TOKENIZER'] = tokenizer
+
+    embeddings = []
+    for sequence in sequences:
+        inputs = tokenizer.batch_encode_plus(sequence, add_special_tokens=True, padding=True, truncation=True,
+                                             max_length=1024)
+        input_ids = torch.tensor(inputs['input_ids'])
+        attention_mask = torch.tensor(inputs['attention_mask'])
+
+        if CUDA_AVAILABLE:
+            outputs = model(input_ids.cuda(), attention_mask.cuda())
+        else:
+            outputs = model(input_ids, attention_mask)
+
+        embeddings.append(outputs['pooler_output'])
+
+    return torch.cat(embeddings, dim=1).cpu()
 
 
 def get_directory_by_suffix(src_dir: AnyPath, suffixes: List, deep: bool = False) -> Generator[Path, None, None]:
@@ -1236,6 +1274,11 @@ class BaseDatamodule(pl.LightningDataModule):
         self.train_set = torch.utils.data.Subset(self.dataset, train_indices)
         self.val_set = torch.utils.data.Subset(self.dataset, val_indices)
         self.test_set = torch.utils.data.Subset(self.dataset, test_indices)
+
+        if len(self.train_set) + len(self.val_set) + len(self.test_set) != self.get_n_samples():
+            raise ValueError(f'Dataset size mismatch: '
+                             f'[{len(self.train_set)}|{len(self.val_set)}|{len(self.test_set)}]'
+                             f' != {self.get_n_samples()}')
 
     def train_dataloader(self) -> torchg.data.DataLoader:
         return torchg.loader.DataLoader(self.train_set, **self.dataloader_kwargs)
