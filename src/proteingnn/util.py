@@ -138,7 +138,8 @@ def evaluate_versions(class_: Any, dataset: Any, ckpt: AnyPath, is_graph: bool =
             get_checkpoints(logdir=logdir, log_name=log_name, deep=deep, metric_name=metric_name, sort_order=sort_order)]
 
 
-def evaluate_ckpt(class_: Any, dataset: Any, ckpt: AnyPath, is_graph: bool = True, verbose: bool = False) -> Dict[str, float]:
+def evaluate_ckpt(class_: Any, dataset: Any, ckpt: AnyPath, is_graph: bool = True, verbose: bool = False,
+                  summary_statistics: bool = True) -> Dict[str, float]:
     """Evaluate checkpoint on x, y.
 
     Args:
@@ -150,7 +151,6 @@ def evaluate_ckpt(class_: Any, dataset: Any, ckpt: AnyPath, is_graph: bool = Tru
     """
 
     model = class_.load_from_checkpoint(ckpt)
-    log_dict = model.hparams.copy()
 
     pred = []
     y = []
@@ -176,6 +176,60 @@ def evaluate_ckpt(class_: Any, dataset: Any, ckpt: AnyPath, is_graph: bool = Tru
     x = np.array(pred)
     y = np.array(y)
 
+    log_dict = model.hparams.copy()
+    log_dict['pcc'], log_dict['pcc_p'] = pearsonr(x, y)
+    log_dict['src'], log_dict['src_p'] = spearmanr(x, y)
+    log_dict['r2'] = r2_score(y, x)
+    log_dict['mse'] = ((y-x) ** 2).sum() / len(x)
+
+    if verbose:
+        print()
+        print(f'R2: {log_dict["r2"]:.2f}')
+        print(f'MSE: {log_dict["mse"]:.2f}')
+        print(f'PCC: {log_dict["pcc"]:.2f} ({log_dict["pcc_p"]:.2f})')
+        print(f'SRC: {log_dict["src"]:.2f} ({log_dict["src_p"]:.2f})')
+        print()
+
+    return log_dict
+
+def evaluate_ckpt(class_: Any, dataset: Any, ckpt: AnyPath, is_graph: bool = True, verbose: bool = False) -> Dict[str, float]:
+    """Evaluate checkpoint on x, y.
+
+    Args:
+        is_graph: True if dataset is graph
+        dataset: Dataset.
+        class_: Model class.
+        ckpt: Path to checkpoint file.
+        verbose: Verbose mode.
+    """
+
+    model = class_.load_from_checkpoint(ckpt)
+
+    pred = []
+    y = []
+
+    if is_graph:
+        for input in dataset:
+            input = torchg.data.batch.Batch.from_data_list([input])
+            try:
+                pred_ = model.forward(input.x, input.edge_index, input.batch)
+            except (TypeError, AttributeError):
+                pred_ = model.forward(input.x)
+
+            pred.append(pred_.detach().item())
+            y.append(input.y.item())
+    else:
+        for x, y_ in dataset:
+            x.unsqueeze_(dim=0)
+            pred_ = model.forward(x)
+
+            pred.append(pred_.item())
+            y.append(y_.item())
+
+    x = np.array(pred)
+    y = np.array(y)
+
+    log_dict = model.hparams.copy()
     log_dict['pcc'], log_dict['pcc_p'] = pearsonr(x, y)
     log_dict['src'], log_dict['src_p'] = spearmanr(x, y)
     log_dict['r2'] = r2_score(y, x)
