@@ -145,7 +145,8 @@ def get_esm_representations(data, layers: Optional[List[int]] = None, model_name
     return representations.cpu()
 
 
-def get_protbert_embedding(sequences: List[str], model_name: Optional[str] = None):
+def get_protbert_embedding(sequences: List[str], model_name: Optional[str] = None, add_special_tokens: bool = True,
+                           padding: bool = True, truncation: bool = False, max_length: Optional[int] = None):
     if model_name is None:
         model_name = 'Rostlab/prot_bert_bfd'
 
@@ -165,19 +166,20 @@ def get_protbert_embedding(sequences: List[str], model_name: Optional[str] = Non
 
     embeddings = []
     for sequence in sequences:
-        inputs = tokenizer.batch_encode_plus(sequence, add_special_tokens=True, padding=True, truncation=True,
-                                             max_length=1024)
+        inputs = tokenizer.batch_encode_plus(sequence, add_special_tokens=add_special_tokens, padding=padding,
+                                             truncation=truncation, max_length=max_length)
         input_ids = torch.tensor(inputs['input_ids'])
         attention_mask = torch.tensor(inputs['attention_mask'])
 
-        if CUDA_AVAILABLE:
-            outputs = model(input_ids.cuda(), attention_mask.cuda())
-        else:
-            outputs = model(input_ids, attention_mask)
+        with torch.no_grad():
+            if CUDA_AVAILABLE:
+                outputs = model(input_ids.cuda(), attention_mask.cuda())
+            else:
+                outputs = model(input_ids, attention_mask)
 
         embeddings.append(outputs['pooler_output'])
 
-    return torch.cat(embeddings, dim=1).cpu()
+    return torch.cat(embeddings, dim=1).squeeze().cpu()
 
 
 def get_directory_by_suffix(src_dir: AnyPath, suffixes: List, deep: bool = False) -> Generator[Path, None, None]:
